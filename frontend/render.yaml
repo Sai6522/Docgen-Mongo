@@ -6,7 +6,7 @@ services:
     staticPublishPath: ./build
     envVars:
       - key: REACT_APP_API_URL
-        value: https://docgen-mongo-backend.vercel.app
+        value: https://backend-p6226a666-sais-projects-d18c33c8.vercel.app
       - key: NODE_ENV
         value: production
     headers:
