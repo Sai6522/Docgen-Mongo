@@ -1,0 +1,4 @@
+name,position,company,department,start_date,salary,manager,working_hours,vacation_days,response_deadline,hr_name,company_address,company_phone,company_email,generation_date
+John Doe,Software Engineer,TechCorp Inc,Engineering,2024-02-01,$75000,Jane Smith,40,20,2024-01-15,Sarah Johnson,"123 Tech Street, Silicon Valley, CA 94000",+1-555-0123,hr@techcorp.com,2024-01-10
+Alice Johnson,Product Manager,TechCorp Inc,Product,2024-02-15,$85000,Mike Brown,40,25,2024-01-20,Sarah Johnson,"123 Tech Street, Silicon Valley, CA 94000",+1-555-0123,hr@techcorp.com,2024-01-10
+Bob Wilson,UX Designer,TechCorp Inc,Design,2024-03-01,$70000,Lisa Davis,40,20,2024-02-01,Sarah Johnson,"123 Tech Street, Silicon Valley, CA 94000",+1-555-0123,hr@techcorp.com,2024-01-10

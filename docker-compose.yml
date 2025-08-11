@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: docgen-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: docgen
+    volumes:
+      - mongo_data:/data/db
+      - ./backend/seed:/docker-entrypoint-initdb.d
+    networks:
+      - docgen-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docgen-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongo:27017/docgen
+      - JWT_SECRET=docgen-super-secret-jwt-key-2025
+      - EMAIL_USER=nagaratnam7895@gmail.com
+      - EMAIL_PASS=cswkceynhggmxyry
+      - FRONTEND_URL=http://localhost:3000
+    depends_on:
+      - mongo
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - uploads:/app/uploads
+    networks:
+      - docgen-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: docgen-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000/api
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - docgen-network
+
+volumes:
+  mongo_data:
+  uploads:
+
+networks:
+  docgen-network:
+    driver: bridge

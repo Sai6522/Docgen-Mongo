@@ -1,0 +1,4 @@
+participant_name,course_name,start_date,end_date,duration,score,grade,issue_date,location,certificate_id,organization
+Alice Cooper,JavaScript Basics,2024-01-01,2024-01-31,30,95,A,2024-02-01,Online,JS-001,CodeAcademy
+Bob Dylan,Python Programming,2024-02-01,2024-02-28,40,88,B+,2024-03-01,Remote,PY-002,CodeAcademy
+Charlie Brown,React Development,2024-03-01,2024-03-31,35,92,A-,2024-04-01,Hybrid,RC-003,CodeAcademy

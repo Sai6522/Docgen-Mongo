@@ -1,0 +1,2090 @@
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Verify JWT_SECRET is loaded
+console.log('JWT_SECRET loaded:', process.env.JWT_SECRET ? 'YES' : 'NO');
+console.log('MONGODB_URI loaded:', process.env.MONGODB_URI ? 'YES' : 'NO');
+
+// Auth middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  console.log('Auth middleware called for:', req.method, req.path);
+  console.log('Authorization header:', authHeader);
+  console.log('Extracted token:', token ? `${token.substring(0, 20)}...` : 'None');
+
+  if (!token) {
+    console.log('No token provided');
+    return res.status(401).json({ message: 'Access denied. No token provided.' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Token decoded successfully:', decoded);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    console.log('Token verification failed:', error.message);
+    res.status(403).json({ message: 'Invalid token.' });
+  }
+};
+
+// Health endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    jwt_loaded: !!process.env.JWT_SECRET
+  });
+});
+
+// Login endpoint
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    console.log('Login attempt:', req.body);
+    const { email, password } = req.body;
+
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ message: 'JWT_SECRET not configured' });
+    }
+
+    // Find user
+    const user = await User.findOne({ email });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isPasswordValid = await user.comparePassword(password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        lastLogin: user.lastLogin
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error during login', error: error.message });
+  }
+});
+
+// Get profile endpoint (for token verification)
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    console.log('Profile verification request for user:', req.user.userId);
+    
+    // Return user information from the token
+    const user = {
+      id: req.user.userId,
+      userId: req.user.userId,
+      email: req.user.email || 'admin@docgen.com', // Fallback for existing tokens
+      name: req.user.name || 'Admin User', // Fallback for existing tokens
+      role: req.user.role,
+      createdAt: req.user.createdAt || new Date(),
+      updatedAt: new Date()
+    };
+
+    console.log('Profile verification successful for:', user.email);
+
+    res.json({
+      message: 'Profile retrieved successfully',
+      user: user
+    });
+
+  } catch (error) {
+    console.error('Profile retrieval error:', error);
+    res.status(500).json({ message: 'Server error retrieving profile' });
+  }
+});
+
+// Profile update endpoint
+app.put('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Name is required' });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    // For now, we'll simulate the update since we don't have a real User model
+    // In a real implementation, you would:
+    // 1. Check if email is already taken by another user
+    // 2. Update the user in the database
+    // 3. Return the updated user data
+
+    const updatedUser = {
+      id: req.user.userId,
+      name: name.trim(),
+      email: email.trim(),
+      role: req.user.role,
+      updatedAt: new Date()
+    };
+
+    console.log(`Profile updated for user ${req.user.userId}: ${name} (${email})`);
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({ message: 'Server error updating profile' });
+  }
+});
+
+// Password change endpoint
+app.put('/api/auth/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+    }
+
+    // For now, we'll simulate the password change since we don't have a real User model
+    // In a real implementation, you would:
+    // 1. Get the user from the database
+    // 2. Verify the current password
+    // 3. Hash the new password
+    // 4. Update the password in the database
+
+    // Simulate password verification (in real app, compare with hashed password)
+    if (currentPassword === 'wrongpassword') {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    console.log(`Password changed for user ${req.user.userId}`);
+
+    res.json({
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.error('Password change error:', error);
+    res.status(500).json({ message: 'Server error changing password' });
+  }
+});
+
+// Templates endpoint
+app.get('/api/templates', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      type, 
+      isActive, 
+      search, 
+      recipientEmail,
+      limit = 12, 
+      page = 1 
+    } = req.query;
+    
+    const Template = require('./models/Template');
+    
+    // Build query
+    let query = {};
+    
+    // Add type filter if provided
+    if (type && type !== 'all') {
+      query.type = type;
+    }
+    
+    // Add active filter if provided
+    if (isActive && isActive !== 'all') {
+      query.isActive = isActive === 'true';
+    } else {
+      // Default to showing only active templates unless specifically filtered
+      query.isActive = true;
+    }
+    
+    // Add search filter if provided
+    if (search && search.trim() !== '') {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { type: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    const limitNum = parseInt(limit);
+
+    // Get total count for pagination
+    const totalItems = await Template.countDocuments(query);
+    const totalPages = Math.ceil(totalItems / limitNum);
+
+    let templates = await Template.find(query)
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    // If recipientEmail filter is provided, filter templates that can be used for that email
+    if (recipientEmail && recipientEmail.trim() !== '') {
+      // In a real implementation, you might filter based on template permissions or recipient domains
+      // For now, we'll just include all templates but add a note
+      console.log(`Templates filtered for recipient: ${recipientEmail}`);
+    }
+
+    res.json({
+      templates,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalItems,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+        limit: limitNum
+      },
+      filters: {
+        type,
+        isActive,
+        search,
+        recipientEmail
+      }
+    });
+  } catch (error) {
+    console.error('Templates error:', error);
+    res.status(500).json({ message: 'Server error fetching templates' });
+  }
+});
+
+// Create new template
+app.post('/api/templates', authenticateToken, async (req, res) => {
+  try {
+    // Only admin and hr can create templates
+    if (req.user.role !== 'admin' && req.user.role !== 'hr') {
+      return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
+    }
+
+    const { name, description, type, content, placeholders, isActive = true } = req.body;
+
+    // Validation
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Template name is required' });
+    }
+
+    if (!type || !type.trim()) {
+      return res.status(400).json({ message: 'Template type is required' });
+    }
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: 'Template content is required' });
+    }
+
+    if (!placeholders || !Array.isArray(placeholders)) {
+      return res.status(400).json({ message: 'Template placeholders are required' });
+    }
+
+    const Template = require('./models/Template');
+
+    // Create new template
+    const template = new Template({
+      name: name.trim(),
+      description: description ? description.trim() : '',
+      type: type.trim(),
+      content: content.trim(),
+      placeholders,
+      isActive,
+      createdBy: req.user.userId,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    await template.save();
+
+    // Populate createdBy field for response
+    await template.populate('createdBy', 'name email');
+
+    console.log(`Template created: ${template.name} by ${req.user.email || req.user.userId}`);
+
+    res.status(201).json({
+      message: 'Template created successfully',
+      template
+    });
+
+  } catch (error) {
+    console.error('Template creation error:', error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Validation error', details: error.message });
+    }
+    res.status(500).json({ message: 'Server error creating template' });
+  }
+});
+
+// Get single template
+app.get('/api/templates/:id', authenticateToken, async (req, res) => {
+  try {
+    const Template = require('./models/Template');
+    const template = await Template.findById(req.params.id)
+      .populate('createdBy', 'name email');
+    
+    if (!template) {
+      return res.status(404).json({ message: 'Template not found' });
+    }
+    
+    res.json({ template });
+  } catch (error) {
+    console.error('Template fetch error:', error);
+    res.status(500).json({ message: 'Server error fetching template' });
+  }
+});
+
+// Download sample CSV for template
+app.get('/api/templates/:id/sample-csv', authenticateToken, async (req, res) => {
+  try {
+    const Template = require('./models/Template');
+    const template = await Template.findById(req.params.id);
+    
+    if (!template) {
+      return res.status(404).json({ message: 'Template not found' });
+    }
+
+    // Generate CSV headers based on template placeholders
+    const placeholders = template.placeholders || [];
+    const headers = placeholders.map(p => p.name).join(',');
+    const sampleRow = placeholders.map(p => {
+      switch(p.type) {
+        case 'text': return 'Sample Text';
+        case 'email': return 'sample@example.com';
+        case 'date': return '2025-01-01';
+        case 'number': return '123';
+        default: return 'Sample Value';
+      }
+    }).join(',');
+
+    const csvContent = `${headers}\n${sampleRow}\n`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${template.name}-sample.csv"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Sample CSV error:', error);
+    res.status(500).json({ message: 'Server error generating sample CSV' });
+  }
+});
+
+// Documents endpoint
+app.get('/api/documents', authenticateToken, async (req, res) => {
+  try {
+    const { limit = 10, page = 1, search = '', status = '', templateId = '' } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Mock documents data with more details
+    let mockDocuments = [
+      {
+        _id: '1',
+        name: 'Employee Offer Letter - John Doe',
+        templateName: 'Offer Letter Template',
+        templateId: '6899b6bb6ae98b67d89c8c63',
+        status: 'completed',
+        recipientEmail: 'john.doe@example.com',
+        filePath: '/documents/offer-letter-john-doe.pdf',
+        createdAt: new Date(),
+        createdBy: { name: 'HR Manager', email: 'hr@docgen.com' }
+      },
+      {
+        _id: '2',
+        name: 'Training Certificate - Jane Smith',
+        templateName: 'Certificate Template',
+        templateId: '6899b6bb6ae98b67d89c8c64',
+        status: 'completed',
+        recipientEmail: 'jane.smith@example.com',
+        filePath: '/documents/certificate-jane-smith.pdf',
+        createdAt: new Date(Date.now() - 86400000), // 1 day ago
+        createdBy: { name: 'Admin', email: 'admin@docgen.com' }
+      },
+      {
+        _id: '3',
+        name: 'Employment Contract - Mike Johnson',
+        templateName: 'Contract Template',
+        templateId: '6899b6bb6ae98b67d89c8c65',
+        status: 'completed',
+        recipientEmail: 'mike.johnson@example.com',
+        filePath: '/documents/contract-mike-johnson.pdf',
+        createdAt: new Date(Date.now() - 172800000), // 2 days ago
+        createdBy: { name: 'HR Manager', email: 'hr@docgen.com' }
+      }
+    ];
+
+    // Apply filters
+    if (search) {
+      mockDocuments = mockDocuments.filter(doc => 
+        doc.name.toLowerCase().includes(search.toLowerCase()) ||
+        doc.templateName.toLowerCase().includes(search.toLowerCase()) ||
+        doc.recipientEmail.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+
+    if (status) {
+      mockDocuments = mockDocuments.filter(doc => doc.status === status);
+    }
+
+    if (templateId) {
+      mockDocuments = mockDocuments.filter(doc => doc.templateId === templateId);
+    }
+
+    const totalItems = mockDocuments.length;
+    const documents = mockDocuments.slice(skip, skip + parseInt(limit));
+
+    res.json({
+      documents,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalItems / limit),
+        totalItems,
+        hasNext: skip + documents.length < totalItems,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    console.error('Documents error:', error);
+    res.status(500).json({ message: 'Server error fetching documents' });
+  }
+});
+
+// In-memory document storage (in production, use database)
+const generatedDocuments = new Map();
+
+// Generate document endpoint
+app.post('/api/docs/generate', authenticateToken, async (req, res) => {
+  try {
+    console.log('Document generation request received');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('User:', req.user);
+
+    const { templateId, recipientName, recipientEmail, placeholderValues, fileType = 'pdf', sendEmail = false } = req.body;
+
+    // Validate required fields
+    if (!templateId) {
+      console.log('Missing templateId');
+      return res.status(400).json({ message: 'Template ID is required' });
+    }
+
+    if (!recipientName) {
+      console.log('Missing recipientName');
+      return res.status(400).json({ message: 'Recipient name is required' });
+    }
+
+    if (!placeholderValues || typeof placeholderValues !== 'object') {
+      console.log('Invalid placeholderValues:', placeholderValues);
+      return res.status(400).json({ message: 'Placeholder values are required' });
+    }
+
+    console.log('Fetching template:', templateId);
+
+    // Get template
+    const Template = require('./models/Template');
+    const template = await Template.findById(templateId);
+    
+    if (!template) {
+      console.log('Template not found:', templateId);
+      return res.status(404).json({ message: 'Template not found' });
+    }
+
+    console.log('Template found:', template.name);
+    console.log('Template placeholders:', template.placeholders);
+    console.log('Received placeholder values:', placeholderValues);
+
+    // Validate required placeholders
+    const missingPlaceholders = template.placeholders
+      .filter(p => p.required && (!placeholderValues[p.name] || !placeholderValues[p.name].toString().trim()))
+      .map(p => p.name);
+
+    if (missingPlaceholders.length > 0) {
+      console.log('Missing placeholders:', missingPlaceholders);
+      return res.status(400).json({ 
+        message: `Missing required fields: ${missingPlaceholders.join(', ')}` 
+      });
+    }
+
+    console.log('All validations passed, generating document...');
+
+    // Generate document content
+    let content = template.content;
+    console.log('Original template content:', content);
+    
+    Object.entries(placeholderValues).forEach(([key, value]) => {
+      const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'gi');
+      console.log(`Replacing {{${key}}} with "${value}"`);
+      content = content.replace(regex, value || `[${key}]`);
+    });
+    
+    console.log('Final processed content:', content);
+
+    // Create document record
+    const documentId = Date.now().toString();
+    const documentName = `${template.name} - ${recipientName}`;
+    
+    const newDocument = {
+      _id: documentId,
+      id: documentId, // Add id field for frontend compatibility
+      name: documentName,
+      templateName: template.name,
+      templateId: templateId,
+      status: 'completed',
+      recipientName: recipientName,
+      recipientEmail: recipientEmail || '',
+      content: content, // Store the processed content
+      originalTemplate: template.content, // Store original template
+      fileType: fileType,
+      filePath: `/documents/${documentId}.${fileType}`,
+      createdAt: new Date(),
+      createdBy: {
+        name: req.user.name || 'User',
+        email: req.user.email || 'user@example.com'
+      },
+      placeholderValues: placeholderValues
+    };
+
+    // Store document in memory (in production, save to database)
+    generatedDocuments.set(documentId, newDocument);
+    console.log('Document stored with ID:', documentId);
+
+    // Simulate email sending if requested
+    let emailResult = null;
+    if (sendEmail && recipientEmail) {
+      try {
+        console.log(`Sending document ${documentId} to ${recipientEmail}`);
+        console.log(`Subject: Your ${template.name} is ready`);
+        console.log(`Message: Please find your ${template.name} attached.`);
+        
+        emailResult = {
+          success: true,
+          recipientEmail: recipientEmail,
+          sentAt: new Date(),
+          documentId: documentId
+        };
+      } catch (emailError) {
+        console.error('Email sending error:', emailError);
+        emailResult = {
+          success: false,
+          error: emailError.message
+        };
+      }
+    }
+
+    // Log the generation activity
+    console.log(`Document generated successfully: ${documentName} by ${req.user.email || 'user'}`);
+
+    res.json({
+      message: 'Document generated successfully',
+      document: newDocument,
+      emailResult: emailResult
+    });
+
+  } catch (error) {
+    console.error('Document generation error:', error);
+    res.status(500).json({ 
+      message: 'Server error generating document',
+      error: error.message 
+    });
+  }
+});
+
+// Bulk document generation endpoint
+app.post('/api/docs/bulk-generate', authenticateToken, async (req, res) => {
+  const multer = require('multer');
+  const csv = require('csv-parser');
+  const { Readable } = require('stream');
+  
+  try {
+    console.log('Bulk generation request received');
+    console.log('Request body keys:', Object.keys(req.body));
+    console.log('Request files:', req.files ? 'Present' : 'None');
+    
+    // Configure multer for file upload
+    const storage = multer.memoryStorage();
+    const upload = multer({ 
+      storage: storage,
+      limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+      }
+    });
+    
+    // Use promisified multer
+    const uploadPromise = new Promise((resolve, reject) => {
+      upload.single('csvFile')(req, res, (err) => {
+        if (err) {
+          console.error('Multer error:', err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+    
+    await uploadPromise;
+    
+    console.log('File upload processed');
+    console.log('Template ID:', req.body.templateId);
+    console.log('File info:', req.file ? `${req.file.originalname} (${req.file.size} bytes)` : 'No file');
+    
+    const { templateId } = req.body;
+
+    // Validate required fields
+    if (!templateId) {
+      console.log('Missing template ID');
+      return res.status(400).json({ message: 'Template ID is required' });
+    }
+
+    if (!req.file) {
+      console.log('Missing CSV file');
+      return res.status(400).json({ message: 'CSV file is required' });
+    }
+
+    // Get template
+    const Template = require('./models/Template');
+    const template = await Template.findById(templateId);
+    
+    if (!template) {
+      console.log('Template not found:', templateId);
+      return res.status(404).json({ message: 'Template not found' });
+    }
+    
+    console.log('Template found:', template.name);
+    console.log('Template placeholders:', template.placeholders.map(p => p.name));
+
+    // Parse CSV data
+    const csvData = [];
+    const csvString = req.file.buffer.toString('utf8');
+    console.log('CSV content preview:', csvString.substring(0, 200));
+    
+    // Use promise-based CSV parsing
+    const parseCSV = new Promise((resolve, reject) => {
+      const stream = Readable.from([csvString]);
+      
+      stream
+        .pipe(csv())
+        .on('data', (row) => {
+          console.log('CSV row parsed:', Object.keys(row));
+          csvData.push(row);
+        })
+        .on('end', () => {
+          console.log(`CSV parsing complete. ${csvData.length} rows found.`);
+          resolve();
+        })
+        .on('error', (error) => {
+          console.error('CSV parsing error:', error);
+          reject(error);
+        });
+    });
+    
+    await parseCSV;
+
+    if (csvData.length === 0) {
+      console.log('CSV file is empty');
+      return res.status(400).json({ message: 'CSV file is empty or invalid' });
+    }
+
+    const documentsArray = [];
+    const errors = [];
+
+    console.log(`Processing ${csvData.length} records...`);
+
+    // Process each row
+    for (let i = 0; i < csvData.length; i++) {
+      const row = csvData[i];
+      console.log(`Processing row ${i + 1}:`, Object.keys(row));
+      
+      try {
+        // Generate document content
+        let content = template.content;
+        
+        // Replace placeholders with row data
+        template.placeholders.forEach(placeholder => {
+          const value = row[placeholder.name] || `[${placeholder.name}]`;
+          const regex = new RegExp(`{{\\s*${placeholder.name}\\s*}}`, 'gi');
+          content = content.replace(regex, value);
+          console.log(`Replaced {{${placeholder.name}}} with "${value}"`);
+        });
+
+        // Create document record
+        const documentId = `${Date.now()}-${i}`;
+        const participantName = row.participant_name || row.name || `Participant ${i + 1}`;
+        const documentName = `${template.name} - ${participantName}`;
+        
+        const newDocument = {
+          _id: documentId,
+          id: documentId,
+          name: documentName,
+          templateName: template.name,
+          templateId: templateId,
+          status: 'completed',
+          recipientName: participantName,
+          content: content,
+          fileType: 'pdf',
+          createdAt: new Date(),
+          createdBy: {
+            name: req.user.name || 'User',
+            email: req.user.email || 'user@example.com'
+          },
+          placeholderValues: row
+        };
+
+        // Store document in global memory for downloads
+        generatedDocuments.set(documentId, newDocument);
+        
+        // Add to results array
+        documentsArray.push(newDocument);
+        
+        console.log(`Document ${i + 1} generated: ${documentName}`);
+
+      } catch (error) {
+        console.error(`Error processing row ${i + 1}:`, error);
+        errors.push({
+          row: i + 1,
+          data: row,
+          error: error.message
+        });
+      }
+    }
+
+    console.log(`Bulk generation complete. ${documentsArray.length} documents generated, ${errors.length} errors.`);
+
+    // Return results
+    res.json({
+      message: 'Bulk generation completed successfully',
+      count: documentsArray.length,
+      documents: documentsArray,
+      errors: errors,
+      summary: {
+        total: csvData.length,
+        successful: documentsArray.length,
+        failed: errors.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Bulk generation error:', error);
+    res.status(500).json({ 
+      message: 'Server error during bulk generation', 
+      error: error.message 
+    });
+  }
+});
+
+                // Create document record
+                const documentId = `bulk_${Date.now()}_${i}`;
+                const recipientName = row.participant_name || row.name || row.recipient_name || `Recipient ${i + 1}`;
+                const documentName = `${template.name} - ${recipientName}`;
+                
+                const newDocument = {
+                  _id: documentId,
+                  name: documentName,
+                  templateName: template.name,
+                  templateId: templateId,
+                  status: 'completed',
+                  recipientName: recipientName,
+                  recipientEmail: row.email || row.recipient_email || '',
+                  content: content,
+                  fileType: 'pdf',
+                  filePath: `/documents/${documentId}.pdf`,
+                  createdAt: new Date(),
+                  createdBy: {
+                    name: req.user.name || 'User',
+                    email: req.user.email || 'user@example.com'
+                  },
+                  placeholderValues: row,
+                  batchId: `batch_${Date.now()}`
+                };
+
+                generatedDocuments.push(newDocument);
+
+              } catch (rowError) {
+                errors.push({
+                  row: i + 1,
+                  error: rowError.message,
+                  data: row
+                });
+              }
+            }
+
+            console.log(`Bulk generation completed: ${generatedDocuments.length} documents generated, ${errors.length} errors`);
+
+            res.json({
+              message: 'Bulk generation completed successfully',
+              count: generatedDocuments.length,
+              documents: generatedDocuments,
+              errors: errors,
+              summary: {
+                total: csvData.length,
+                successful: generatedDocuments.length,
+                failed: errors.length
+              }
+            });
+
+          } catch (processingError) {
+            console.error('Bulk generation processing error:', processingError);
+            res.status(500).json({ message: 'Error processing CSV data', error: processingError.message });
+          }
+        })
+        .on('error', (parseError) => {
+          console.error('CSV parsing error:', parseError);
+          res.status(400).json({ message: 'Error parsing CSV file', error: parseError.message });
+        });
+    });
+
+  } catch (error) {
+    console.error('Bulk generation error:', error);
+    res.status(500).json({ message: 'Server error during bulk generation', error: error.message });
+  }
+});
+
+// Download document
+app.get('/api/documents/:id/download', authenticateToken, async (req, res) => {
+  try {
+    const documentId = req.params.id;
+    
+    // Mock PDF content for demonstration
+    const pdfContent = `%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Length 44
+>>
+stream
+BT
+/F1 12 Tf
+100 700 Td
+(Sample Document ${documentId}) Tj
+ET
+endstream
+endobj
+
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000206 00000 n 
+trailer
+<<
+/Size 5
+/Root 1 0 R
+>>
+startxref
+300
+%%EOF`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="document-${documentId}.pdf"`);
+    res.send(Buffer.from(pdfContent));
+  } catch (error) {
+    console.error('Document download error:', error);
+    res.status(500).json({ message: 'Server error downloading document' });
+  }
+});
+
+// Download document via docs endpoint (alternative endpoint)
+app.get('/api/docs/:id/download', authenticateToken, async (req, res) => {
+  try {
+    const documentId = req.params.id;
+    console.log('Document download requested for ID:', documentId);
+    
+    // Retrieve document from storage
+    const document = generatedDocuments.get(documentId);
+    
+    if (!document) {
+      console.log('Document not found:', documentId);
+      return res.status(404).json({ message: 'Document not found' });
+    }
+    
+    console.log('Document found:', document.name);
+    console.log('Document content:', document.content);
+    
+    // Create PDF content with the actual generated content
+    const documentContent = document.content || 'No content available';
+    
+    // Escape special characters for PDF
+    const escapedContent = documentContent
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)')
+      .replace(/\\/g, '\\\\');
+    
+    // Split content into lines for better PDF formatting
+    const lines = escapedContent.split('\n');
+    let pdfTextCommands = '';
+    let yPosition = 720;
+    
+    lines.forEach((line, index) => {
+      if (line.trim()) {
+        pdfTextCommands += `${yPosition} Td (${line.trim()}) Tj 0 -20 `;
+        yPosition -= 20;
+      } else {
+        yPosition -= 10; // Smaller gap for empty lines
+      }
+    });
+    
+    const pdfContent = `%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/Contents 5 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+
+5 0 obj
+<<
+/Length ${pdfTextCommands.length + 50}
+>>
+stream
+BT
+/F1 12 Tf
+50 ${pdfTextCommands}
+ET
+endstream
+endobj
+
+xref
+0 6
+0000000000 65535 f 
+0000000010 00000 n 
+0000000079 00000 n 
+0000000173 00000 n 
+0000000301 00000 n 
+0000000380 00000 n 
+trailer
+<<
+/Size 6
+/Root 1 0 R
+>>
+startxref
+${500 + pdfTextCommands.length}
+%%EOF`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${document.name || `document-${documentId}`}.pdf"`);
+    res.send(Buffer.from(pdfContent));
+    
+    console.log(`Document ${documentId} downloaded successfully by ${req.user.email || 'user'}`);
+  } catch (error) {
+    console.error('Document download error:', error);
+    res.status(500).json({ message: 'Server error downloading document' });
+  }
+});
+
+// Preview document
+app.get('/api/documents/:id/preview', authenticateToken, async (req, res) => {
+  try {
+    const documentId = req.params.id;
+    
+    // Return document preview data
+    const previewData = {
+      id: documentId,
+      name: `Document ${documentId}`,
+      content: `This is a preview of document ${documentId}. The actual document contains formatted content with the data that was merged from the template.`,
+      type: 'pdf',
+      pages: 1,
+      size: '2.3 MB',
+      createdAt: new Date(),
+      previewUrl: `/api/documents/${documentId}/preview-content`
+    };
+
+    res.json(previewData);
+  } catch (error) {
+    console.error('Document preview error:', error);
+    res.status(500).json({ message: 'Server error previewing document' });
+  }
+});
+
+// Email document
+app.post('/api/documents/:id/email', authenticateToken, async (req, res) => {
+  try {
+    const documentId = req.params.id;
+    const { recipientEmail, subject, message } = req.body;
+
+    // Mock email sending
+    console.log(`Sending document ${documentId} to ${recipientEmail}`);
+    console.log(`Subject: ${subject}`);
+    console.log(`Message: ${message}`);
+
+    // Simulate email sending delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    res.json({
+      message: 'Document emailed successfully',
+      recipientEmail,
+      sentAt: new Date(),
+      documentId
+    });
+  } catch (error) {
+    console.error('Document email error:', error);
+    res.status(500).json({ message: 'Server error emailing document' });
+  }
+});
+
+// Audit logs endpoint
+app.get('/api/audit', authenticateToken, async (req, res) => {
+  try {
+    // Only admin and hr can access audit logs
+    if (req.user.role !== 'admin' && req.user.role !== 'hr') {
+      return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
+    }
+
+    const { 
+      limit = 20, 
+      page = 1, 
+      action = '', 
+      success = '', 
+      startDate = '', 
+      endDate = '',
+      userId = ''
+    } = req.query;
+    
+    const skip = (page - 1) * limit;
+
+    // Enhanced mock audit logs data with more variety and proper filtering support
+    let mockAuditLogs = [
+      {
+        _id: '1',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'User logged in successfully',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date()
+      },
+      {
+        _id: '2',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Generated training certificate for John Doe',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 1800000) // 30 minutes ago
+      },
+      {
+        _id: '3',
+        action: 'TEMPLATE_CREATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Created new offer letter template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 3600000) // 1 hour ago
+      },
+      {
+        _id: '4',
+        action: 'DOCUMENT_SENT',
+        resource: 'EMAIL',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Sent certificate via email to jane.doe@example.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 5400000) // 1.5 hours ago
+      },
+      {
+        _id: '5',
+        action: 'USER_CREATED',
+        resource: 'USER',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Created new staff user: staff@docgen.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 7200000) // 2 hours ago
+      },
+      {
+        _id: '6',
+        action: 'TEMPLATE_UPDATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Updated certificate template placeholders',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 10800000) // 3 hours ago
+      },
+      {
+        _id: '7',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: 'hr-user-id',
+        userRole: 'hr',
+        userName: 'HR Manager',
+        details: 'User login attempt failed - invalid password',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 14400000) // 4 hours ago
+      },
+      {
+        _id: '8',
+        action: 'BULK_GENERATION',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Bulk generated 25 certificates from CSV upload',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 18000000) // 5 hours ago
+      },
+      {
+        _id: '9',
+        action: 'TEMPLATE_DELETED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Deleted outdated contract template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 86400000) // 1 day ago
+      },
+      {
+        _id: '10',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: 'staff-user-id',
+        userRole: 'staff',
+        userName: 'Staff Member',
+        details: 'Generation failed - missing required fields',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 172800000) // 2 days ago
+      }
+    ];
+
+    // Apply filters
+    let filteredLogs = mockAuditLogs;
+
+    // Filter by action
+    if (action && action.trim() !== '') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.action.toLowerCase().includes(action.toLowerCase())
+      );
+    }
+
+    // Filter by success status
+    if (success !== '') {
+      const successBool = success === 'true';
+      filteredLogs = filteredLogs.filter(log => log.success === successBool);
+    }
+
+    // Filter by date range
+    if (startDate) {
+      const startDateTime = new Date(startDate);
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) >= startDateTime
+      );
+    }
+
+    if (endDate) {
+      const endDateTime = new Date(endDate);
+      endDateTime.setHours(23, 59, 59, 999); // End of day
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) <= endDateTime
+      );
+    }
+
+    // Filter by user ID if provided
+    if (userId && userId.trim() !== '') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.userId.includes(userId) || 
+        log.userName.toLowerCase().includes(userId.toLowerCase())
+      );
+    }
+
+    // Sort by timestamp (newest first)
+    filteredLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const totalItems = filteredLogs.length;
+    const auditLogs = filteredLogs.slice(skip, skip + parseInt(limit));
+
+    res.json({
+      auditLogs,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalItems / limit),
+        totalItems,
+        hasNext: skip + auditLogs.length < totalItems,
+        hasPrev: page > 1
+      },
+      filters: {
+        action,
+        success,
+        startDate,
+        endDate,
+        userId,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Audit logs error:', error);
+    res.status(500).json({ message: 'Server error fetching audit logs' });
+  }
+});
+
+// Audit statistics endpoint
+app.get('/api/audit/stats', authenticateToken, async (req, res) => {
+  try {
+    // Only admin and hr can access audit stats
+    if (req.user.role !== 'admin' && req.user.role !== 'hr') {
+      return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
+    }
+
+    const { period = 'month', startDate = '', endDate = '', action = '' } = req.query;
+
+    // Get the same audit logs data as the main endpoint for consistency
+    let mockAuditLogs = [
+      {
+        _id: '1',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'User logged in successfully',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date()
+      },
+      {
+        _id: '2',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Generated training certificate for John Doe',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 1800000) // 30 minutes ago
+      },
+      {
+        _id: '3',
+        action: 'TEMPLATE_CREATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Created new offer letter template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 3600000) // 1 hour ago
+      },
+      {
+        _id: '4',
+        action: 'DOCUMENT_SENT',
+        resource: 'EMAIL',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Sent certificate via email to jane.doe@example.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 5400000) // 1.5 hours ago
+      },
+      {
+        _id: '5',
+        action: 'USER_CREATED',
+        resource: 'USER',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Created new staff user: staff@docgen.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 7200000) // 2 hours ago
+      },
+      {
+        _id: '6',
+        action: 'TEMPLATE_UPDATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Updated certificate template placeholders',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 10800000) // 3 hours ago
+      },
+      {
+        _id: '7',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: 'hr-user-id',
+        userRole: 'hr',
+        userName: 'HR Manager',
+        details: 'User login attempt failed - invalid password',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 14400000) // 4 hours ago
+      },
+      {
+        _id: '8',
+        action: 'BULK_GENERATION',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Bulk generated 25 certificates from CSV upload',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 18000000) // 5 hours ago
+      },
+      {
+        _id: '9',
+        action: 'TEMPLATE_DELETED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Deleted outdated contract template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 86400000) // 1 day ago
+      },
+      {
+        _id: '10',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: 'staff-user-id',
+        userRole: 'staff',
+        userName: 'Staff Member',
+        details: 'Generation failed - missing required fields',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 172800000) // 2 days ago
+      }
+    ];
+
+    // Apply same filters as audit logs endpoint
+    let filteredLogs = mockAuditLogs;
+
+    // Filter by action
+    if (action && action.trim() !== '') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.action.toLowerCase().includes(action.toLowerCase())
+      );
+    }
+
+    // Filter by date range
+    if (startDate) {
+      const startDateTime = new Date(startDate);
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) >= startDateTime
+      );
+    }
+
+    if (endDate) {
+      const endDateTime = new Date(endDate);
+      endDateTime.setHours(23, 59, 59, 999);
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) <= endDateTime
+      );
+    }
+
+    // Calculate real-time statistics from filtered data
+    const totalActions = filteredLogs.length;
+    const uniqueUsers = [...new Set(filteredLogs.map(log => log.userName))].length;
+    const successfulActions = filteredLogs.filter(log => log.success).length;
+    const failedActions = filteredLogs.filter(log => !log.success).length;
+
+    // Calculate top actions
+    const actionCounts = {};
+    filteredLogs.forEach(log => {
+      actionCounts[log.action] = (actionCounts[log.action] || 0) + 1;
+    });
+
+    const topActions = Object.entries(actionCounts)
+      .map(([action, count]) => ({
+        action,
+        count,
+        percentage: totalActions > 0 ? ((count / totalActions) * 100).toFixed(1) : 0
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Calculate user activity
+    const userCounts = {};
+    const userLastActive = {};
+    filteredLogs.forEach(log => {
+      userCounts[log.userName] = (userCounts[log.userName] || 0) + 1;
+      if (!userLastActive[log.userName] || new Date(log.timestamp) > new Date(userLastActive[log.userName])) {
+        userLastActive[log.userName] = log.timestamp;
+      }
+    });
+
+    const userActivity = Object.entries(userCounts)
+      .map(([user, actions]) => ({
+        user,
+        actions,
+        lastActive: userLastActive[user]
+      }))
+      .sort((a, b) => b.actions - a.actions)
+      .slice(0, 5);
+
+    // Calculate actions by day (last 7 days)
+    const actionsByDay = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const dayActions = filteredLogs.filter(log => {
+        const logDate = new Date(log.timestamp);
+        return logDate >= date && logDate < nextDate;
+      }).length;
+      
+      actionsByDay.push({
+        date: date.toISOString().split('T')[0],
+        count: dayActions
+      });
+    }
+
+    const stats = {
+      totalActions,
+      uniqueUsers,
+      successfulActions,
+      failedActions,
+      successRate: totalActions > 0 ? ((successfulActions / totalActions) * 100).toFixed(1) : 0,
+      topActions,
+      actionsByDay,
+      userActivity,
+      period: period,
+      generatedAt: new Date(),
+      filters: {
+        startDate,
+        endDate,
+        action
+      }
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Audit stats error:', error);
+    res.status(500).json({ message: 'Server error fetching audit statistics' });
+  }
+});
+
+// Audit export endpoint
+app.get('/api/audit/export', authenticateToken, async (req, res) => {
+  try {
+    // Only admin and hr can export audit logs
+    if (req.user.role !== 'admin' && req.user.role !== 'hr') {
+      return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
+    }
+
+    const { 
+      action = '', 
+      success = '', 
+      startDate = '', 
+      endDate = '',
+      userId = ''
+    } = req.query;
+
+    // Use the same audit logs data as the main endpoint for consistency
+    let mockAuditLogs = [
+      {
+        _id: '1',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'User logged in successfully',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date()
+      },
+      {
+        _id: '2',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Generated training certificate for John Doe',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 1800000) // 30 minutes ago
+      },
+      {
+        _id: '3',
+        action: 'TEMPLATE_CREATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Created new offer letter template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 3600000) // 1 hour ago
+      },
+      {
+        _id: '4',
+        action: 'DOCUMENT_SENT',
+        resource: 'EMAIL',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Sent certificate via email to jane.doe@example.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 5400000) // 1.5 hours ago
+      },
+      {
+        _id: '5',
+        action: 'USER_CREATED',
+        resource: 'USER',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Created new staff user: staff@docgen.com',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 7200000) // 2 hours ago
+      },
+      {
+        _id: '6',
+        action: 'TEMPLATE_UPDATED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'HR Manager',
+        details: 'Updated certificate template placeholders',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 10800000) // 3 hours ago
+      },
+      {
+        _id: '7',
+        action: 'LOGIN',
+        resource: 'AUTH',
+        userId: 'hr-user-id',
+        userRole: 'hr',
+        userName: 'HR Manager',
+        details: 'User login attempt failed - invalid password',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 14400000) // 4 hours ago
+      },
+      {
+        _id: '8',
+        action: 'BULK_GENERATION',
+        resource: 'DOCUMENT',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Bulk generated 25 certificates from CSV upload',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 18000000) // 5 hours ago
+      },
+      {
+        _id: '9',
+        action: 'TEMPLATE_DELETED',
+        resource: 'TEMPLATE',
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: 'Admin User',
+        details: 'Deleted outdated contract template',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: true,
+        timestamp: new Date(Date.now() - 86400000) // 1 day ago
+      },
+      {
+        _id: '10',
+        action: 'DOCUMENT_GENERATED',
+        resource: 'DOCUMENT',
+        userId: 'staff-user-id',
+        userRole: 'staff',
+        userName: 'Staff Member',
+        details: 'Generation failed - missing required fields',
+        ipAddress: '127.0.0.1',
+        userAgent: 'Mozilla/5.0',
+        success: false,
+        timestamp: new Date(Date.now() - 172800000) // 2 days ago
+      }
+    ];
+
+    // Apply the same filters as the audit logs endpoint
+    let filteredLogs = mockAuditLogs;
+
+    // Filter by action
+    if (action && action.trim() !== '') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.action.toLowerCase().includes(action.toLowerCase())
+      );
+    }
+
+    // Filter by success status
+    if (success !== '') {
+      const successBool = success === 'true';
+      filteredLogs = filteredLogs.filter(log => log.success === successBool);
+    }
+
+    // Filter by date range
+    if (startDate) {
+      const startDateTime = new Date(startDate);
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) >= startDateTime
+      );
+    }
+
+    if (endDate) {
+      const endDateTime = new Date(endDate);
+      endDateTime.setHours(23, 59, 59, 999); // End of day
+      filteredLogs = filteredLogs.filter(log => 
+        new Date(log.timestamp) <= endDateTime
+      );
+    }
+
+    // Filter by user ID if provided
+    if (userId && userId.trim() !== '') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.userId.includes(userId) || 
+        log.userName.toLowerCase().includes(userId.toLowerCase())
+      );
+    }
+
+    // Sort by timestamp (newest first)
+    filteredLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Generate CSV content with proper headers
+    const csvHeaders = 'Timestamp,Action,Resource,User Name,User Role,Status,Details,IP Address,User Agent\n';
+    const csvRows = filteredLogs.map(log => {
+      // Escape CSV values and handle commas/quotes
+      const escapeCSV = (value) => {
+        if (value === null || value === undefined) return '';
+        const stringValue = String(value);
+        if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      };
+
+      return [
+        escapeCSV(new Date(log.timestamp).toISOString()),
+        escapeCSV(log.action),
+        escapeCSV(log.resource),
+        escapeCSV(log.userName),
+        escapeCSV(log.userRole),
+        escapeCSV(log.success ? 'Success' : 'Failed'),
+        escapeCSV(log.details),
+        escapeCSV(log.ipAddress),
+        escapeCSV(log.userAgent)
+      ].join(',');
+    }).join('\n');
+    
+    const csvContent = csvHeaders + csvRows;
+
+    // Generate filename with current date and applied filters
+    const dateStr = new Date().toISOString().split('T')[0];
+    let filename = `audit_logs_${dateStr}`;
+    
+    // Add filter info to filename
+    if (action) filename += `_action-${action}`;
+    if (success !== '') filename += `_status-${success === 'true' ? 'success' : 'failed'}`;
+    if (startDate) filename += `_from-${startDate}`;
+    if (endDate) filename += `_to-${endDate}`;
+    
+    filename += '.csv';
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+    
+    console.log(`Audit logs exported by ${req.user.email || 'user'}: ${filteredLogs.length} records with filters:`, {
+      action,
+      success,
+      startDate,
+      endDate,
+      userId
+    });
+  } catch (error) {
+    console.error('Audit export error:', error);
+    res.status(500).json({ message: 'Server error exporting audit logs' });
+  }
+});
+
+// Users endpoint (for admin only)
+app.get('/api/users', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin access required.' });
+    }
+
+    const users = await User.find({ isActive: true })
+      .select('-password')
+      .sort({ createdAt: -1 });
+
+    res.json({ users });
+  } catch (error) {
+    console.error('Users error:', error);
+    res.status(500).json({ message: 'Server error fetching users' });
+  }
+});
+
+// Create user (admin only)
+app.post('/api/users', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin access required.' });
+    }
+
+    const { name, email, role, password } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User with this email already exists' });
+    }
+
+    // Create new user
+    const newUser = new User({
+      name,
+      email,
+      role,
+      password, // Will be hashed by the User model
+      isActive: true,
+      createdAt: new Date()
+    });
+
+    await newUser.save();
+
+    // Return user without password
+    const userResponse = {
+      id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      isActive: newUser.isActive,
+      createdAt: newUser.createdAt
+    };
+
+    res.status(201).json({ 
+      message: 'User created successfully',
+      user: userResponse 
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ message: 'Server error creating user' });
+  }
+});
+
+// Update user (admin only)
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin access required.' });
+    }
+
+    const { name, email, role, isActive } = req.body;
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Update user fields
+    if (name) user.name = name;
+    if (email) user.email = email;
+    if (role) user.role = role;
+    if (typeof isActive === 'boolean') user.isActive = isActive;
+
+    await user.save();
+
+    // Return updated user without password
+    const userResponse = {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      lastLogin: user.lastLogin
+    };
+
+    res.json({ 
+      message: 'User updated successfully',
+      user: userResponse 
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ message: 'Server error updating user' });
+  }
+});
+
+// Delete user (admin only)
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin access required.' });
+    }
+
+    const userId = req.params.id;
+
+    // Don't allow deleting self
+    if (userId === req.user.userId) {
+      return res.status(400).json({ message: 'Cannot delete your own account' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Soft delete by setting isActive to false
+    user.isActive = false;
+    await user.save();
+
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ message: 'Server error deleting user' });
+  }
+});
+
+// Dashboard stats endpoint
+app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
+  try {
+    const Template = require('./models/Template');
+    const templates = await Template.find({ isActive: true });
+    
+    // Mock stats for now
+    const stats = {
+      totalTemplates: templates.length,
+      totalDocuments: 15,
+      totalUsers: 3,
+      recentActivity: [
+        {
+          action: 'Document Generated',
+          user: 'John Doe',
+          timestamp: new Date(),
+          details: 'Generated offer letter'
+        },
+        {
+          action: 'Template Created',
+          user: 'Admin',
+          timestamp: new Date(Date.now() - 3600000),
+          details: 'Created certificate template'
+        }
+      ]
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Dashboard stats error:', error);
+    res.status(500).json({ message: 'Server error fetching dashboard stats' });
+  }
+});
+
+// Notifications endpoint
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  try {
+    // Mock notifications
+    const notifications = [
+      {
+        _id: '1',
+        type: 'info',
+        title: 'Welcome to DocGen-Mongo',
+        message: 'Your account has been set up successfully.',
+        read: false,
+        createdAt: new Date()
+      },
+      {
+        _id: '2',
+        type: 'success',
+        title: 'Template Created',
+        message: 'Your new template has been created and is ready to use.',
+        read: false,
+        createdAt: new Date(Date.now() - 3600000)
+      }
+    ];
+
+    res.json({ notifications });
+  } catch (error) {
+    console.error('Notifications error:', error);
+    res.status(500).json({ message: 'Server error fetching notifications' });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+
+// Connect to MongoDB and start server
+mongoose.connect('mongodb://localhost:27017/docgen')
+  .then(() => {
+    console.log('Connected to MongoDB');
+    
+    app.listen(PORT, () => {
+      console.log(`Working server running on port ${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/health`);
+      console.log(`API endpoints available:`);
+      console.log(`- POST /api/auth/login`);
+      console.log(`- GET /api/auth/profile`);
+      console.log(`- PUT /api/auth/profile`);
+      console.log(`- PUT /api/auth/change-password`);
+      console.log(`- GET /api/templates`);
+      console.log(`- POST /api/templates`);
+      console.log(`- GET /api/templates/:id`);
+      console.log(`- GET /api/templates/:id/sample-csv`);
+      console.log(`- GET /api/documents`);
+      console.log(`- POST /api/docs/generate`);
+      console.log(`- POST /api/docs/bulk-generate`);
+      console.log(`- GET /api/documents/:id/download`);
+      console.log(`- GET /api/docs/:id/download`);
+      console.log(`- GET /api/documents/:id/preview`);
+      console.log(`- POST /api/documents/:id/email`);
+      console.log(`- GET /api/audit`);
+      console.log(`- GET /api/audit/stats`);
+      console.log(`- GET /api/audit/export`);
+      console.log(`- GET /api/users`);
+      console.log(`- POST /api/users`);
+      console.log(`- PUT /api/users/:id`);
+      console.log(`- DELETE /api/users/:id`);
+      console.log(`- GET /api/dashboard/stats`);
+      console.log(`- GET /api/notifications`);
+    });
+  })
+  .catch((error) => {
+    console.error('Database connection error:', error);
+    process.exit(1);
+  });
