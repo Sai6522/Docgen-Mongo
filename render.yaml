@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: docgen-mongo-app
+    env: static
+    repo: https://github.com/Sai6522/Docgen-Mongo
+    branch: main
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://backend-p6226a666-sais-projects-d18c33c8.vercel.app
+      - key: NODE_ENV
+        value: production
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
